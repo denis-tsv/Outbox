@@ -60,6 +60,11 @@ public class Linq2DbOutboxBackgroundService : BackgroundService, IOutboxMessages
         
         if (partition == null) return 0;
         
+        partition.RetryAt = DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay;
+        
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        
         var outboxMessages = await dbContext.OutboxMessages
             .AsNoTracking()
             .ToLinqToDB()
@@ -77,7 +82,6 @@ public class Linq2DbOutboxBackgroundService : BackgroundService, IOutboxMessages
         {
             partition.RetryAt = DateTimeOffset.UtcNow + _outboxOptions.Value.NoMessagesDelay;
             await dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
             return 0;
         }
 
@@ -89,8 +93,6 @@ public class Linq2DbOutboxBackgroundService : BackgroundService, IOutboxMessages
         partition.RetryAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
-        
         return outboxMessages.Length;
     }
 
