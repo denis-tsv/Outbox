@@ -10,12 +10,16 @@ using Outbox.WebApi.Telemetry;
 
 namespace Outbox.WebApi.BackgroundServices;
 
-public class EFOutboxBackgroundService : BackgroundService
+public class OneLongTransactionEFOutboxBackgroundService : BackgroundService, IOutboxMessagesProcessor
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptions<OutboxConfiguration> _outboxOptions;
+    
+    private readonly AutoResetEvent _event = new(false);
+    private string? _topic;
+    private int? _partition;
 
-    public EFOutboxBackgroundService(IServiceProvider serviceProvider, IOptions<OutboxConfiguration> outboxOptions)
+    public OneLongTransactionEFOutboxBackgroundService(IServiceProvider serviceProvider, IOptions<OutboxConfiguration> outboxOptions)
     {
         _serviceProvider = serviceProvider;
         _outboxOptions = outboxOptions;
@@ -26,7 +30,7 @@ public class EFOutboxBackgroundService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var processedMessages = await ProcessMessagesAsync(stoppingToken);
-            if (processedMessages == 0) await Task.Delay(_outboxOptions.Value.NoMessagesDelay, stoppingToken);
+            if (processedMessages == 0) _event.WaitOne(_outboxOptions.Value.NoMessagesDelay);
         }
     }
 
@@ -36,12 +40,21 @@ public class EFOutboxBackgroundService : BackgroundService
         await using var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        var partition = string.IsNullOrEmpty(_topic) && !_partition.HasValue
+            ? await dbContext.VirtualPartitions
+                .Where(x => x.RetryAt < DateTimeOffset.UtcNow)
+                .OrderBy(x => x.RetryAt)
+                .ForUpdateSkipLocked()
+                .FirstOrDefaultAsync(cancellationToken)
+            : await dbContext.VirtualPartitions
+                .Where(x => x.Topic == _topic && x.Partition == _partition)
+                .ForUpdateSkipLocked()
+                .FirstOrDefaultAsync(cancellationToken);
         
-        var partition = await dbContext.VirtualPartitions
-            .Where(x => x.RetryAt < DateTimeOffset.UtcNow)
-            .OrderBy(x => x.RetryAt)
-            .ForUpdateSkipLocked()
-            .FirstOrDefaultAsync(cancellationToken);
+        _topic = null; 
+        _partition = null;
+        
         if (partition == null) return 0;
 
         var transactionId = new NpgsqlParameter("last_processed_transaction_id", NpgsqlDbType.Xid8);
@@ -92,5 +105,13 @@ public class EFOutboxBackgroundService : BackgroundService
         }
           
         return Task.CompletedTask;
+    }
+
+    public void NewMessagesPersisted(string topic, int partition)
+    {
+        _topic = topic;
+        _partition = partition;
+        
+        _event.Set();
     }
 }

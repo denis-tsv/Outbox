@@ -11,16 +11,12 @@ using Outbox.WebApi.Telemetry;
 
 namespace Outbox.WebApi.BackgroundServices;
 
-public class Linq2DbOutboxBackgroundService : BackgroundService, IOutboxMessagesProcessor
+public class TwoShortTransactionsLinq2DbOutboxBackgroundService : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptions<OutboxConfiguration> _outboxOptions;
     
-    private readonly AutoResetEvent _event = new(false);
-    private string? _topic;
-    private int? _partition;
-    
-    public Linq2DbOutboxBackgroundService(IServiceProvider serviceProvider, IOptions<OutboxConfiguration> outboxOptions)
+    public TwoShortTransactionsLinq2DbOutboxBackgroundService(IServiceProvider serviceProvider, IOptions<OutboxConfiguration> outboxOptions)
     {
         _serviceProvider = serviceProvider;
         _outboxOptions = outboxOptions;
@@ -31,7 +27,7 @@ public class Linq2DbOutboxBackgroundService : BackgroundService, IOutboxMessages
         while (!stoppingToken.IsCancellationRequested)
         {
             var processedMessages = await ProcessMessagesAsync(stoppingToken);
-            if (processedMessages == 0) _event.WaitOne(_outboxOptions.Value.NoMessagesDelay);
+            if (processedMessages == 0) await Task.Delay(_outboxOptions.Value.NoMessagesDelay, stoppingToken);
         }
     }
 
@@ -39,35 +35,33 @@ public class Linq2DbOutboxBackgroundService : BackgroundService, IOutboxMessages
     {
         using var scope = _serviceProvider.CreateScope();
         await using var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        //disable tracking of outbox messages array
+        dbContext.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTracking;
+        await using var dataContext = dbContext.CreateLinqToDBContext();
+        
+        // can be simplified after release of linq2db 6.0.0  https://github.com/linq2db/linq2db/issues/4414
+        var ids = dataContext.GetTable<VirtualPartition>()
+            .Where(x => x.RetryAt < DateTimeOffset.UtcNow)
+            .OrderBy(x => x.RetryAt)
+            .Take(1)
+            .SubQueryHint(PostgreSQLHints.ForUpdate)
+            .SubQueryHint(PostgreSQLHints.SkipLocked)
+            .Select(x => x.Id);
 
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        
-        var partition = string.IsNullOrEmpty(_topic) && !_partition.HasValue
-            ? await dbContext.VirtualPartitions.ToLinqToDB()
-                .Where(x => x.RetryAt < DateTimeOffset.UtcNow)
-                .OrderBy(x => x.RetryAt)
-                .QueryHint(PostgreSQLHints.ForUpdate)
-                .QueryHint(PostgreSQLHints.SkipLocked)
-                .FirstOrDefaultAsyncLinqToDB(cancellationToken)
-            : await dbContext.VirtualPartitions.ToLinqToDB()
-                .Where(x => x.Topic == _topic && x.Partition == _partition)
-                .QueryHint(PostgreSQLHints.ForUpdate)
-                .QueryHint(PostgreSQLHints.SkipLocked)
-                .FirstOrDefaultAsyncLinqToDB(cancellationToken);
-        
-        _topic = null; 
-        _partition = null;
-        
+        var partitions = await dataContext.GetTable<VirtualPartition>()
+            .Where(x => ids.Contains(x.Id))
+            .UpdateWithOutputAsync(
+                dataContext.GetTable<VirtualPartition>(),
+                x => new VirtualPartition
+                {
+                    RetryAt = DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay
+                },
+                (source, deleted, inserted) => inserted, cancellationToken);
+
+        var partition = partitions.FirstOrDefault();
         if (partition == null) return 0;
         
-        partition.RetryAt = DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay;
-        
-        await dbContext.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        
-        var outboxMessages = await dbContext.OutboxMessages
-            .AsNoTracking()
-            .ToLinqToDB()
+        var outboxMessages = await dataContext.GetTable<OutboxMessage>()
             .Where(x => x.Topic == partition.Topic && 
                         x.Partition == partition.Partition &&
                         x.TransactionId >= partition.LastProcessedTransactionId &&
@@ -76,22 +70,27 @@ public class Linq2DbOutboxBackgroundService : BackgroundService, IOutboxMessages
             )
             .OrderBy(x => x.TransactionId).ThenBy(x => x.Id)
             .Take(_outboxOptions.Value.BatchSize)
-            .ToArrayAsyncEF(cancellationToken);
+            .ToArrayAsyncLinqToDB(cancellationToken);
 
         if (!outboxMessages.Any())
         {
-            partition.RetryAt = DateTimeOffset.UtcNow + _outboxOptions.Value.NoMessagesDelay;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await dataContext.GetTable<VirtualPartition>()
+                .Where(x => x.Id == partition.Id)
+                .Set(x => x.RetryAt, DateTimeOffset.UtcNow + _outboxOptions.Value.NoMessagesDelay)
+                .UpdateAsync(cancellationToken);
+            
             return 0;
         }
 
         await ProcessOutboxMessagesAsync(outboxMessages, cancellationToken);
 
         var lastMessage = outboxMessages.Last();
-        partition.LastProcessedId = lastMessage.Id;
-        partition.LastProcessedTransactionId = lastMessage.TransactionId;
-        partition.RetryAt = DateTimeOffset.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
+        await dataContext.GetTable<VirtualPartition>()
+            .Where(x => x.Id == partition.Id)
+            .Set(x => x.LastProcessedId, lastMessage.Id)
+            .Set(x => x.LastProcessedTransactionId, lastMessage.TransactionId)
+            .Set(x => x.RetryAt, DateTimeOffset.UtcNow)
+            .UpdateAsync(cancellationToken);
 
         return outboxMessages.Length;
     }
@@ -107,13 +106,5 @@ public class Linq2DbOutboxBackgroundService : BackgroundService, IOutboxMessages
         }
         
         return Task.CompletedTask;
-    }
-
-    public void NewMessagesPersisted(string topic, int partition)
-    {
-        _topic = topic;
-        _partition = partition;
-        
-        _event.Set();
     }
 }

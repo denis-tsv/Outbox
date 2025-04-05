@@ -33,11 +33,13 @@ builder.Services.Configure<OutboxConfiguration>(builder.Configuration.GetSection
 
 builder.Services.AddSingleton<OutboxInterceptor>();
 
-builder.Services.AddSingleton<Linq2DbOutboxBackgroundService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<Linq2DbOutboxBackgroundService>());
-//builder.Services.AddHostedService<EFOutboxBackgroundService>();
+builder.Services.AddSingleton<TwoShortTransactionsLinq2DbOutboxBackgroundService>();
+builder.Services.AddSingleton<OneLongTransactionEFOutboxBackgroundService>();
 
-builder.Services.AddSingleton<IOutboxMessagesProcessor>(sp => sp.GetRequiredService<Linq2DbOutboxBackgroundService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TwoShortTransactionsLinq2DbOutboxBackgroundService>());
+//builder.Services.AddHostedService(sp => sp.GetRequiredService<OneLongTransactionEFOutboxBackgroundService>());
+
+builder.Services.AddSingleton<IOutboxMessagesProcessor>(sp => sp.GetRequiredService<OneLongTransactionEFOutboxBackgroundService>());
 
 builder.Services.AddOpenTelemetry()
     .WithTracing(bld =>
