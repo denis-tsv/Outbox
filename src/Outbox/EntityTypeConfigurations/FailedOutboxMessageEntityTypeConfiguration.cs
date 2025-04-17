@@ -8,8 +8,6 @@ public class FailedOutboxMessageEntityTypeConfiguration : IEntityTypeConfigurati
 {
     public void Configure(EntityTypeBuilder<FailedOutboxMessage> builder)
     {
-        builder.ToTable("failed_outbox_messages");
-        
         builder.Property(x => x.TransactionId).HasColumnType("xid8");
         builder.Property(x => x.Payload).HasColumnType("jsonb");
         builder.Property(x => x.Headers).HasColumnType("jsonb");
