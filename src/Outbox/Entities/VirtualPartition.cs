@@ -1,4 +1,4 @@
-namespace Outbox;
+namespace Outbox.Entities;
 
 public class VirtualPartition
 {
@@ -7,5 +7,5 @@ public class VirtualPartition
     public string Topic { get; set; } = null!;
     public ulong LastProcessedTransactionId { get; set; }
     public int LastProcessedId { get; set; }
-    public DateTimeOffset RetryAt { get; set; }
+    public DateTimeOffset RetryAfter { get; set; }
 }

@@ -1,6 +1,6 @@
-﻿namespace Outbox.Entities;
+namespace Outbox.Entities;
 
-public class OutboxMessage
+public class FailedOutboxMessage
 {
     public int Id { get; set; }
     public ulong TransactionId { get; set; }

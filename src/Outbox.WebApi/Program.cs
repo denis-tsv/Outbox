@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Outbox;
 using Outbox.Configurations;
+using Outbox.Entities;
 using Outbox.WebApi.BackgroundServices;
 using Outbox.WebApi.EFCore;
 using Outbox.WebApi.Linq2db;
@@ -13,7 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
-builder.Services.AddDbContext<AppDbContext>((serviceProvider, optionsBuilder) =>
+builder.Services.AddDbContextPool<AppDbContext>((serviceProvider, optionsBuilder) =>
 {
     var dataSource = new NpgsqlDataSourceBuilder(builder.Configuration.GetConnectionString("Outbox"))
         .EnableDynamicJson()
@@ -26,20 +27,24 @@ builder.Services.AddDbContext<AppDbContext>((serviceProvider, optionsBuilder) =>
         .AddInterceptors(new ForUpdateInterceptor(), serviceProvider.GetRequiredService<OutboxInterceptor>());
 });
 
-LinqToDBForEFTools.Implementation = new OutboxLinqToDBForEFToolsImpl();
+LinqToDBForEFTools.Implementation = new OutboxLinqToDBForEFToolsImpl(builder.Configuration.GetConnectionString("Outbox")!);
 LinqToDBForEFTools.Initialize();
 
 builder.Services.Configure<OutboxConfiguration>(builder.Configuration.GetSection("Outbox"));
 
 builder.Services.AddSingleton<OutboxInterceptor>();
 
-builder.Services.AddSingleton<TwoShortTransactionsLinq2DbOutboxBackgroundService>();
-builder.Services.AddSingleton<OneLongTransactionEFOutboxBackgroundService>();
+builder.Services.AddSingleton<OneLongTransactionBackgroundService>();
+builder.Services.AddSingleton<OneLongTransactionPartitionBackgroundService>();
+builder.Services.AddSingleton<TwoShortTransactionsUpdatableBackgroundService>();
+builder.Services.AddSingleton<TwoShortTransactionsAppendOnlyBackgroundService>();
 
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TwoShortTransactionsLinq2DbOutboxBackgroundService>());
-//builder.Services.AddHostedService(sp => sp.GetRequiredService<OneLongTransactionEFOutboxBackgroundService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TwoShortTransactionsAppendOnlyBackgroundService>());
+//builder.Services.AddHostedService(sp => sp.GetRequiredService<TwoShortTransactionsUpdatableBackgroundService>());
+//builder.Services.AddHostedService(sp => sp.GetRequiredService<OneLongTransactionPartitionBackgroundService>());
+//builder.Services.AddHostedService(sp => sp.GetRequiredService<OneLongTransactionBackgroundService>());
 
-builder.Services.AddSingleton<IOutboxMessagesProcessor>(sp => sp.GetRequiredService<OneLongTransactionEFOutboxBackgroundService>());
+builder.Services.AddSingleton<IOutboxMessagesProcessor>(sp => sp.GetRequiredService<OneLongTransactionPartitionBackgroundService>());
 
 builder.Services.AddOpenTelemetry()
     .WithTracing(bld =>
@@ -53,6 +58,7 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.Services.CreateScope().ServiceProvider.GetRequiredService<AppDbContext>().Database.Migrate();
 }
 
 app.UseHttpsRedirection();

@@ -5,46 +5,64 @@ using Npgsql;
 using NpgsqlTypes;
 using OpenTelemetry.Context.Propagation;
 using Outbox.Configurations;
+using Outbox.Entities;
 using Outbox.Extensions;
 using Outbox.WebApi.Telemetry;
 
 namespace Outbox.WebApi.BackgroundServices;
 
-public class OneLongTransactionEFOutboxBackgroundService : BackgroundService, IOutboxMessagesProcessor
+public class OneLongTransactionPartitionBackgroundService : BackgroundService, IOutboxMessagesProcessor
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptions<OutboxConfiguration> _outboxOptions;
-    
+    private readonly ILogger<OneLongTransactionPartitionBackgroundService> _logger;
+
     private readonly AutoResetEvent _event = new(false);
     private string? _topic;
     private int? _partition;
 
-    public OneLongTransactionEFOutboxBackgroundService(IServiceProvider serviceProvider, IOptions<OutboxConfiguration> outboxOptions)
+    public OneLongTransactionPartitionBackgroundService(
+        IServiceProvider serviceProvider, 
+        IOptions<OutboxConfiguration> outboxOptions,
+        ILogger<OneLongTransactionPartitionBackgroundService> logger)
     {
         _serviceProvider = serviceProvider;
         _outboxOptions = outboxOptions;
+        _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var processedMessages = await ProcessMessagesAsync(stoppingToken);
-            if (processedMessages == 0) _event.WaitOne(_outboxOptions.Value.NoMessagesDelay);
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                await using var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                int processedMessages;
+                do
+                {
+                    processedMessages = await ProcessMessagesAsync(dbContext, stoppingToken);
+                    dbContext.ChangeTracker.Clear();
+                } while (processedMessages >= 0);
+
+                _event.WaitOne(_outboxOptions.Value.NoMessagesDelay);
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Something wrong");
+            }
         }
     }
 
-    private async Task<int> ProcessMessagesAsync(CancellationToken cancellationToken)
+    private async Task<int> ProcessMessagesAsync(AppDbContext dbContext, CancellationToken cancellationToken)
     {
-        using var scope = _serviceProvider.CreateScope();
-        await using var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
 
         var partition = string.IsNullOrEmpty(_topic) && !_partition.HasValue
             ? await dbContext.VirtualPartitions
-                .Where(x => x.RetryAt < DateTimeOffset.UtcNow)
-                .OrderBy(x => x.RetryAt)
+                .Where(x => x.RetryAfter < DateTimeOffset.UtcNow)
+                .OrderBy(x => x.RetryAfter)
                 .ForUpdateSkipLocked()
                 .FirstOrDefaultAsync(cancellationToken)
             : await dbContext.VirtualPartitions
@@ -55,7 +73,7 @@ public class OneLongTransactionEFOutboxBackgroundService : BackgroundService, IO
         _topic = null; 
         _partition = null;
         
-        if (partition == null) return 0;
+        if (partition == null) return -1;
 
         var transactionId = new NpgsqlParameter("last_processed_transaction_id", NpgsqlDbType.Xid8);
         transactionId.Value = partition.LastProcessedTransactionId;
@@ -66,16 +84,17 @@ public class OneLongTransactionEFOutboxBackgroundService : BackgroundService, IO
                             o.partition = {partition.Partition} AND
                             o.transaction_id >= {transactionId} AND
                             o.id > {partition.LastProcessedId} AND
-                            o.transaction_id < pg_snapshot_xmin(pg_current_snapshot())
+                            o.transaction_id < pg_snapshot_xmin(pg_current_snapshot()) AND
+                            o.failed = false AND
+                            (o.retry_after is null OR o.retry_after < {DateTime.UtcNow})  
                       """)
-            .AsNoTracking()
             .OrderBy(x => x.TransactionId).ThenBy(x => x.Id)
             .Take(_outboxOptions.Value.BatchSize)
             .ToArrayAsync(cancellationToken);
 
         if (!outboxMessages.Any())
         {
-            partition.RetryAt = DateTimeOffset.UtcNow + _outboxOptions.Value.NoMessagesDelay;
+            partition.RetryAfter = DateTimeOffset.UtcNow + _outboxOptions.Value.NoMessagesDelay;
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
             return 0;
@@ -83,10 +102,11 @@ public class OneLongTransactionEFOutboxBackgroundService : BackgroundService, IO
 
         await ProcessOutboxMessagesAsync(outboxMessages, cancellationToken);
 
-        var lastMessage = outboxMessages.Last();
+        var lastMessage = outboxMessages.FirstOrDefault(x => x is {Failed: false, RetryAfter: not null}) 
+                          ?? outboxMessages.Last();
         partition.LastProcessedId = lastMessage.Id;
         partition.LastProcessedTransactionId = lastMessage.TransactionId;
-        partition.RetryAt = DateTimeOffset.UtcNow;
+        partition.RetryAfter = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
         
         await transaction.CommitAsync(cancellationToken);
@@ -100,8 +120,25 @@ public class OneLongTransactionEFOutboxBackgroundService : BackgroundService, IO
         {
             var context = Propagators.DefaultTextMapPropagator.Extract(default, message.Headers, (d, s) => d.Where(x => x.Key == s).Select(x => x.Value).ToArray());
             using var activity = ActivitySources.Tracing.StartActivity("Outbox", ActivityKind.Internal, context.ActivityContext);
+
+            try
+            {
+                //send
+                
+            }
+            catch (Exception e)
+            {
+                if (message.RetryCount >= 3)  //max retry count
+                {
+                    message.Failed = true;
+                }
+                else
+                {
+                    message.RetryCount++;
+                    message.RetryAfter = DateTimeOffset.UtcNow.AddSeconds(1); // some strategy
+                }
+            }
             
-            //Send message to broker like Kafka or RabbitMQ, or send HTTP/gRPC request to some external system...
         }
           
         return Task.CompletedTask;

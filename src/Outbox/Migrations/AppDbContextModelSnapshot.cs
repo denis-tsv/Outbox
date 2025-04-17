@@ -24,7 +24,7 @@ namespace Outbox.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Outbox.OutboxMessage", b =>
+            modelBuilder.Entity("Outbox.Entities.FailedOutboxMessage", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -34,10 +34,12 @@ namespace Outbox.Migrations
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("now()");
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("Failed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("failed");
 
                     b.Property<Dictionary<string, string>>("Headers")
                         .IsRequired()
@@ -57,6 +59,88 @@ namespace Outbox.Migrations
                         .IsRequired()
                         .HasColumnType("jsonb")
                         .HasColumnName("payload");
+
+                    b.Property<DateTimeOffset?>("RetryAfter")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("retry_after");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("retry_count");
+
+                    b.Property<string>("Topic")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("topic");
+
+                    b.Property<ulong>("TransactionId")
+                        .HasColumnType("xid8")
+                        .HasColumnName("transaction_id");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_failed_outbox_messages");
+
+                    b.HasIndex("CreatedAt", "RetryAfter", "Failed")
+                        .HasDatabaseName("ix_failed_outbox_messages_created_at_retry_after_failed");
+
+                    b.HasIndex("Topic", "Partition", "TransactionId", "Id")
+                        .HasDatabaseName("ix_failed_outbox_messages_topic_partition_transaction_id_id");
+
+                    b.ToTable("failed_outbox_messages", "outbox");
+                });
+
+            modelBuilder.Entity("Outbox.Entities.OutboxMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<bool>("Failed")
+                        .HasColumnType("boolean")
+                        .HasColumnName("failed");
+
+                    b.Property<Dictionary<string, string>>("Headers")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("headers");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("key");
+
+                    b.Property<int>("Partition")
+                        .HasColumnType("integer")
+                        .HasColumnName("partition");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("payload");
+
+                    b.Property<DateTimeOffset?>("RetryAfter")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("retry_after");
+
+                    b.Property<int>("RetryCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("retry_count");
 
                     b.Property<string>("Topic")
                         .IsRequired()
@@ -79,13 +163,16 @@ namespace Outbox.Migrations
                     b.HasKey("Id")
                         .HasName("pk_outbox_messages");
 
+                    b.HasIndex("CreatedAt", "RetryAfter", "Failed")
+                        .HasDatabaseName("ix_outbox_messages_created_at_retry_after_failed");
+
                     b.HasIndex("Topic", "Partition", "TransactionId", "Id")
                         .HasDatabaseName("ix_outbox_messages_topic_partition_transaction_id_id");
 
                     b.ToTable("outbox_messages", "outbox");
                 });
 
-            modelBuilder.Entity("Outbox.VirtualPartition", b =>
+            modelBuilder.Entity("Outbox.Entities.VirtualPartition", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -106,10 +193,10 @@ namespace Outbox.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("partition");
 
-                    b.Property<DateTimeOffset>("RetryAt")
+                    b.Property<DateTimeOffset>("RetryAfter")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
-                        .HasColumnName("retry_at")
+                        .HasColumnName("retry_after")
                         .HasDefaultValueSql("now()");
 
                     b.Property<string>("Topic")
