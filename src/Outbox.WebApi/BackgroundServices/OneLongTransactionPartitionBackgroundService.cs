@@ -82,8 +82,10 @@ public class OneLongTransactionPartitionBackgroundService : BackgroundService, I
                       SELECT * FROM outbox.outbox_messages o
                       WHERE o.topic = {partition.Topic} AND
                             o.partition = {partition.Partition} AND
-                            o.transaction_id >= {transactionId} AND
-                            o.id > {partition.LastProcessedId} AND
+                            (
+                                o.transaction_id > {transactionId} OR
+                                o.transaction_id = {transactionId} AND o.id > {partition.LastProcessedId} 
+                            ) AND
                             o.transaction_id < pg_snapshot_xmin(pg_current_snapshot()) AND
                             o.failed = false AND
                             (o.retry_after is null OR o.retry_after < {DateTime.UtcNow})  

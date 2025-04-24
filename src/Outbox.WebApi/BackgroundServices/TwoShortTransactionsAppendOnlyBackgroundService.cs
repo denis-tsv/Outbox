@@ -74,8 +74,10 @@ public class TwoShortTransactionsAppendOnlyBackgroundService : BackgroundService
         var outboxMessages = await dataContext.GetTable<OutboxMessage>()
             .Where(x => x.Topic == partition.Topic && 
                         x.Partition == partition.Partition &&
-                        x.TransactionId >= partition.LastProcessedTransactionId &&
-                        x.Id > partition.LastProcessedId &&
+                        (
+                            x.TransactionId > partition.LastProcessedTransactionId ||
+                            x.TransactionId == partition.LastProcessedTransactionId && x.Id > partition.LastProcessedId
+                        ) &&
                         x.TransactionId < PostgreSqlExtensions.MinCurrentTransactionId
             )
             .OrderBy(x => x.TransactionId).ThenBy(x => x.Id)
