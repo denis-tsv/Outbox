@@ -7,13 +7,14 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <PackageReference Include="EFCore.MigrationExtensions" Version="9.0.1" />
       <PackageReference Include="EFCore.NamingConventions" Version="9.0.0" />
       <PackageReference Include="linq2db.EntityFrameworkCore" Version="9.1.0-preview.4" />
       <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
     </ItemGroup>
 
     <ItemGroup>
-      <Folder Include="Migrations\" />
+      <EmbeddedResource Include="Sql\insert_outbox_offset_message.sql" />
     </ItemGroup>
 
 </Project>
