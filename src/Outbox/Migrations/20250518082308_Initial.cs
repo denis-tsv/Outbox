@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using EFCore.MigrationExtensions.SqlObjects;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -9,21 +8,22 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Outbox.Migrations
 {
     /// <inheritdoc />
-    public partial class OffsetMessages : Migration
+    public partial class Initial : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.EnsureSchema(
+                name: "outbox");
+
             migrationBuilder.CreateTable(
-                name: "outbox_offset_messages",
+                name: "outbox_messages",
                 schema: "outbox",
                 columns: table => new
                 {
                     id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
                     topic = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
-                    partition = table.Column<int>(type: "integer", nullable: false),
-                    offset = table.Column<long>(type: "bigint", nullable: false),
                     key = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
                     type = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
                     payload = table.Column<string>(type: "jsonb", nullable: false),
@@ -32,7 +32,7 @@ namespace Outbox.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("pk_outbox_offset_messages", x => x.id);
+                    table.PrimaryKey("pk_outbox_messages", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -40,34 +40,27 @@ namespace Outbox.Migrations
                 schema: "outbox",
                 columns: table => new
                 {
-                    value = table.Column<long>(type: "bigint", nullable: false)
+                    id = table.Column<int>(type: "integer", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    last_processed_id = table.Column<long>(type: "bigint", nullable: false)
                 },
                 constraints: table =>
                 {
+                    table.PrimaryKey("pk_outbox_offsets", x => x.id);
                 });
 
-            migrationBuilder.CreateIndex(
-                name: "ix_outbox_offset_messages_topic_partition_offset",
+            migrationBuilder.InsertData(
                 schema: "outbox",
-                table: "outbox_offset_messages",
-                columns: new[] { "topic", "partition", "offset" });
-
-            migrationBuilder.CreateOrUpdateSqlObject(
-                name: "insert_outbox_offset_message.sql",
-                sqlCode: "CREATE OR REPLACE PROCEDURE outbox.insert_outbox_offset_message(topic varchar, partition int, type varchar, key varchar, payload jsonb, headers jsonb)\nLANGUAGE plpgsql\nAS $$\nDECLARE\ncounter BIGINT;\n    tid TID;\nBEGIN\ninsert into outbox.outbox_offset_messages(topic, partition, type, key, payload, headers, \"offset\")\nvalues (topic, partition, type, key, payload, headers, 0)\n    returning ctid into tid;\nupdate outbox.outbox_offsets set value = value + 1 returning value into counter;\nupdate outbox.outbox_offset_messages set \"offset\" = counter where ctid = tid;\n\nEND;\n$$;",
-                order: 2147483647);
+                table: "outbox_offsets",
+                columns: new[] { "id", "last_processed_id" },
+                values: new object[] { 1, 0L });
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropSqlObject(
-                name: "insert_outbox_offset_message.sql",
-                sqlCode: "DROP procedure outbox.insert_outbox_offset_message",
-                order: 2147483647);
-
             migrationBuilder.DropTable(
-                name: "outbox_offset_messages",
+                name: "outbox_messages",
                 schema: "outbox");
 
             migrationBuilder.DropTable(

@@ -12,22 +12,22 @@ public class OutboxInterceptor : ISaveChangesInterceptor
     public OutboxInterceptor(IOutboxMessagesProcessor outboxMessagesProcessor) => 
         _outboxMessagesProcessor = outboxMessagesProcessor;
 
-    private readonly ConcurrentDictionary<DbContext, (string Topic, int Partition)> _contextsWithOutboxMessages = new();
+    private readonly ConcurrentDictionary<DbContext, string> _contextsWithOutboxMessages = new();
 
     private void OnSavingChanges(DbContext context)
     {
         var message = context.ChangeTracker.Entries<OutboxMessage>()
             .FirstOrDefault(x => x.State == EntityState.Added);
-        if (message != null) _contextsWithOutboxMessages.TryAdd(context, (message.Entity.Topic, message.Entity.Partition));
+        if (message != null) _contextsWithOutboxMessages.TryAdd(context, message.Entity.Topic);
     }
 
     private void OnSaveChanges(DbContext context)
     {
         if (_contextsWithOutboxMessages.ContainsKey(context))
         {
-            if (_contextsWithOutboxMessages.TryRemove(context, out var partition))
+            if (_contextsWithOutboxMessages.TryRemove(context, out _))
             {
-                _outboxMessagesProcessor.NewMessagesPersisted(partition.Topic, partition.Partition);
+                _outboxMessagesProcessor.NewMessagesPersisted();
             }
         }
     }

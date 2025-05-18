@@ -8,6 +8,6 @@ public class OutboxOffsetEntityTypeConfiguration : IEntityTypeConfiguration<Outb
 {
     public void Configure(EntityTypeBuilder<OutboxOffset> builder)
     {
-        builder.HasNoKey();
+        builder.HasData(new OutboxOffset {Id = 1, LastProcessedId = 0});
     }
 }

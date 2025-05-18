@@ -2,5 +2,6 @@ namespace Outbox.Entities;
 
 public class OutboxOffset
 {
-    public long Value { get; set; }
+    public int Id { get; set; }
+    public long LastProcessedId { get; set; }
 }
