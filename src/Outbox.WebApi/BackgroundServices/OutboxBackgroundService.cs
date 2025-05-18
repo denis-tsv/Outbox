@@ -15,7 +15,6 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
     private readonly ILogger<OutboxBackgroundService> _logger;
     private readonly IDistributedLockProvider _distributedLockProvider;
 
-    //channel is faster then AutoResetEvent
     private readonly AutoResetEvent _autoResetEvent = new(false);
     
     public OutboxBackgroundService(
