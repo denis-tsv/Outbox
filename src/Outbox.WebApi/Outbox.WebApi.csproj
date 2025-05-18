@@ -10,6 +10,7 @@
     <ItemGroup>
         <PackageReference Include="Confluent.Kafka.DependencyInjection" Version="3.2.0" />
         <PackageReference Include="EFCore.MigrationExtensions.PostgreSQL" Version="9.0.1" />
+        <PackageReference Include="linq2db.EntityFrameworkCore" Version="9.1.0-preview.4" />
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.2"/>
         <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.3">
           <PrivateAssets>all</PrivateAssets>

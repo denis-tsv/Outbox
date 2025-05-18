@@ -9,4 +9,5 @@ public class OutboxMessage
     public string Payload { get; set; } = null!;
     public Dictionary<string, string> Headers { get; set; } = null!;
     public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset AvailableAfter { get; set; }
 }

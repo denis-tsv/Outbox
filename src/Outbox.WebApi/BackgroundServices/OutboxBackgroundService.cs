@@ -1,10 +1,12 @@
 using System.Text;
 using Confluent.Kafka;
+using LinqToDB;
+using LinqToDB.DataProvider.PostgreSQL;
+using LinqToDB.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Outbox.Configurations;
 using Outbox.Entities;
-using Outbox.Extensions;
 
 namespace Outbox.WebApi.BackgroundServices;
 
@@ -49,14 +51,23 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
 
     private async Task<int> ProcessMessagesAsync(AppDbContext dbContext, CancellationToken cancellationToken)
     {
-        var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        
         var outboxMessages = await dbContext.OutboxMessages
+            .Where(x => DateTimeOffset.UtcNow > x.AvailableAfter)
             .AsNoTracking()
+            .ToLinqToDB()
             .OrderBy(x => x.Id)
             .Take(_outboxOptions.Value.BatchSize)
-            .ForUpdateSkipLocked()
-            .ToArrayAsync(cancellationToken);
+            .SubQueryHint(PostgreSQLHints.ForUpdate)
+            .SubQueryHint(PostgreSQLHints.SkipLocked)
+            .AsSubQuery()
+            .UpdateWithOutput(x => x,
+                x => new OutboxMessage
+                {
+                    AvailableAfter = DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay
+                },
+                (_, _, inserted) => inserted)
+            .AsQueryable()
+            .ToArrayAsyncLinqToDB(cancellationToken);
 
         if (!outboxMessages.Any()) return 0;
 
@@ -66,8 +77,6 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
         await dbContext.OutboxMessages
             .Where(x => messageIds.Contains(x.Id))
             .ExecuteDeleteAsync(cancellationToken);
-        
-        await transaction.CommitAsync(cancellationToken);
         
         return outboxMessages.Length;
     }
