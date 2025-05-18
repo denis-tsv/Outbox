@@ -81,8 +81,8 @@ namespace Outbox.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<long>("LastProcessedId")
-                        .HasColumnType("bigint")
+                    b.Property<int>("LastProcessedId")
+                        .HasColumnType("integer")
                         .HasColumnName("last_processed_id");
 
                     b.HasKey("Id")
@@ -94,7 +94,7 @@ namespace Outbox.Migrations
                         new
                         {
                             Id = 1,
-                            LastProcessedId = 0L
+                            LastProcessedId = 0
                         });
                 });
 #pragma warning restore 612, 618

@@ -13,7 +13,7 @@ using Outbox;
 namespace Outbox.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20250518082308_Initial")]
+    [Migration("20250518091433_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -84,8 +84,8 @@ namespace Outbox.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<long>("LastProcessedId")
-                        .HasColumnType("bigint")
+                    b.Property<int>("LastProcessedId")
+                        .HasColumnType("integer")
                         .HasColumnName("last_processed_id");
 
                     b.HasKey("Id")
@@ -97,7 +97,7 @@ namespace Outbox.Migrations
                         new
                         {
                             Id = 1,
-                            LastProcessedId = 0L
+                            LastProcessedId = 0
                         });
                 });
 #pragma warning restore 612, 618

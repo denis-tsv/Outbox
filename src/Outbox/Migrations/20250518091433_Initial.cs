@@ -42,7 +42,7 @@ namespace Outbox.Migrations
                 {
                     id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    last_processed_id = table.Column<long>(type: "bigint", nullable: false)
+                    last_processed_id = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -53,7 +53,7 @@ namespace Outbox.Migrations
                 schema: "outbox",
                 table: "outbox_offsets",
                 columns: new[] { "id", "last_processed_id" },
-                values: new object[] { 1, 0L });
+                values: new object[] { 1, 0 });
         }
 
         /// <inheritdoc />
