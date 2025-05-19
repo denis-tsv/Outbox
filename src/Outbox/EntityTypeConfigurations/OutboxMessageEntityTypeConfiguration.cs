@@ -10,9 +10,6 @@ public class OutboxMessageEntityTypeConfiguration : IEntityTypeConfiguration<Out
     {
         builder.HasKey(x => x.Id);
 
-        builder.Property(x => x.Id)
-            .ValueGeneratedNever()
-            .HasDefaultValueSql("nextval('outbox.outbox_messages_id_sequence')");
         builder.Property(x => x.Payload).HasColumnType("jsonb");
         builder.Property(x => x.Headers).HasColumnType("jsonb");
         builder.Property(x => x.Key).HasMaxLength(128);

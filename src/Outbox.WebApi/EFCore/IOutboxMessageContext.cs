@@ -32,6 +32,7 @@ public class OutboxMessageContext : IOutboxMessageContext
         await using var batch = new NpgsqlBatch(transaction.Connection as NpgsqlConnection, transaction as NpgsqlTransaction);
 
         var lockCommand = batch.CreateBatchCommand();
+        //LOCK TABLE outbox.outbox_messages IN ROW EXCLUSIVE MODE; --alternative to advisory lock
         lockCommand.CommandText = "SELECT pg_advisory_xact_lock(554738281823524)";
         batch.BatchCommands.Add(lockCommand);
         

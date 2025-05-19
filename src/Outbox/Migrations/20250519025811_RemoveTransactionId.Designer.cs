@@ -13,7 +13,7 @@ using Outbox;
 namespace Outbox.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20250519023930_RemoveTransactionId")]
+    [Migration("20250519025811_RemoveTransactionId")]
     partial class RemoveTransactionId
     {
         /// <inheritdoc />
@@ -30,9 +30,11 @@ namespace Outbox.Migrations
             modelBuilder.Entity("Outbox.Entities.OutboxMessage", b =>
                 {
                     b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
-                        .HasColumnName("id")
-                        .HasDefaultValueSql("nextval('outbox.outbox_messages_id_sequence')");
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .ValueGeneratedOnAdd()
