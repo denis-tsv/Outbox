@@ -8,7 +8,7 @@ namespace Outbox.WebApi.EFCore;
 
 public interface IOutboxMessageContext
 {
-    void AddM(OutboxMessage message);
+    void Add(OutboxMessage message);
     Task SaveChangesAsync(DbTransaction transaction, CancellationToken ct);
 }
 
@@ -20,7 +20,7 @@ public class OutboxMessageContext : IOutboxMessageContext
     public OutboxMessageContext(IOutboxMessagesProcessor outboxMessagesProcessor) => 
         _outboxMessagesProcessor = outboxMessagesProcessor;
 
-    public void AddM(OutboxMessage message)
+    public void Add(OutboxMessage message)
     {
         _messages.Add(message);
     }

@@ -71,7 +71,7 @@ app.MapPost("/messages", async (CreateMessageDto dto, AppDbContext dbContext, IO
             Payload = dto.Payload,
             Headers = activityContext.GetHeaders()
         };
-        outboxMessageContext.AddM(message);
+        outboxMessageContext.Add(message);
 
         var transaction = await dbContext.Database.BeginTransactionAsync(ct);
 
