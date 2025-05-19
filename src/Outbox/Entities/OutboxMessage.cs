@@ -3,7 +3,6 @@
 public class OutboxMessage
 {
     public int Id { get; set; }
-    public ulong TransactionId { get; set; }
     public string Topic { get; set; } = null!;
     public int Partition { get; set; }
     public string? Key { get; set; }

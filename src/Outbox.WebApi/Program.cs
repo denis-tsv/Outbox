@@ -3,6 +3,7 @@ using Confluent.Kafka;
 using EFCore.MigrationExtensions.PostgreSQL;
 using LinqToDB.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using Outbox;
 using Outbox.Configurations;
@@ -26,10 +27,12 @@ builder.Services.AddDbContextPool<AppDbContext>((serviceProvider, optionsBuilder
             dataSource,
             options => options.MigrationsHistoryTable("_migrations", "outbox"))
         .UseSnakeCaseNamingConvention()
-        .AddInterceptors(new ForUpdateInterceptor(), serviceProvider.GetRequiredService<OutboxInterceptor>());
+        .AddInterceptors(new ForUpdateInterceptor());
     
     optionsBuilder.UseSqlObjects();
 });
+
+builder.Services.AddScoped<IOutboxMessageContext, OutboxMessageContext>();
 
 LinqToDBForEFTools.Implementation = new OutboxLinqToDBForEFToolsImpl(builder.Configuration.GetConnectionString("Outbox")!);
 LinqToDBForEFTools.Initialize();
@@ -37,7 +40,6 @@ LinqToDBForEFTools.Initialize();
 builder.Services.AddKafkaClient();
 
 builder.Services.Configure<OutboxConfiguration>(builder.Configuration.GetSection("Outbox"));
-builder.Services.AddSingleton<OutboxInterceptor>();
 
 builder.Services.AddSingleton<OutboxBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<OutboxBackgroundService>());
@@ -57,7 +59,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapPost("/messages", async (CreateMessageDto dto, AppDbContext dbContext, CancellationToken ct) =>
+app.MapPost("/messages", async (CreateMessageDto dto, AppDbContext dbContext, IOutboxMessageContext outboxMessageContext, CancellationToken ct) =>
     {
         var activityContext = Activity.Current?.Context;
         var message = new OutboxMessage
@@ -69,10 +71,15 @@ app.MapPost("/messages", async (CreateMessageDto dto, AppDbContext dbContext, Ca
             Payload = dto.Payload,
             Headers = activityContext.GetHeaders()
         };
-        
-        dbContext.OutboxMessages.Add(message);
+        outboxMessageContext.Add(message);
 
-        await dbContext.SaveChangesAsync(ct);
+        var transaction = await dbContext.Database.BeginTransactionAsync(ct);
+
+        await dbContext.SaveChangesAsync(ct); //save business entities
+
+        await outboxMessageContext.SaveChangesAsync(transaction.GetDbTransaction(), ct);
+        
+        await transaction.CommitAsync(ct);
     })
     .WithName("CreateMessage");
 

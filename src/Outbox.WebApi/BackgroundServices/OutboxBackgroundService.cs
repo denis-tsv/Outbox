@@ -6,7 +6,6 @@ using LinqToDB.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Outbox.Configurations;
 using Outbox.Entities;
-using Outbox.WebApi.Linq2db;
 
 namespace Outbox.WebApi.BackgroundServices;
 
@@ -92,13 +91,8 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
         var outboxMessages = await dataConnection.GetTable<OutboxMessage>()
             .Where(x => x.Topic == offset.Topic && 
                         x.Partition == offset.Partition &&
-                        (
-                            x.TransactionId > offset.LastProcessedTransactionId ||
-                            x.TransactionId == offset.LastProcessedTransactionId && x.Id > offset.LastProcessedId
-                        ) &&
-                        x.TransactionId < PostgreSqlExtensions.MinCurrentTransactionId
-            )
-            .OrderBy(x => x.TransactionId).ThenBy(x => x.Id)
+                        x.Id > offset.LastProcessedId)
+            .OrderBy(x => x.Id)
             .Take(_outboxOptions.Value.BatchSize)
             .ToArrayAsyncLinqToDB(cancellationToken);
 
@@ -118,7 +112,6 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
         await dataConnection.GetTable<OutboxOffset>()
             .Where(x => x.Id == offset.Id)
             .Set(x => x.LastProcessedId, lastMessage.Id)
-            .Set(x => x.LastProcessedTransactionId, lastMessage.TransactionId)
             .Set(x => x.AvailableAfter, DateTimeOffset.UtcNow)
             .UpdateAsync(cancellationToken);
         
