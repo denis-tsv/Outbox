@@ -63,6 +63,7 @@ app.MapPost("/messages", async (CreateMessageDto dto, AppDbContext dbContext, Ca
         var message = new OutboxMessage
         {
             Topic = dto.Topic,
+            Partition = 0, //hash key % partitions count, ...
             Type = dto.Type,
             Key = dto.Key,
             Payload = dto.Payload,

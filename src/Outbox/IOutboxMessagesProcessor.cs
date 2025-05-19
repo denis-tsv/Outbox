@@ -2,5 +2,5 @@ namespace Outbox;
 
 public interface IOutboxMessagesProcessor
 {
-    void NewMessagesPersisted();
+    void NewMessagesPersisted(string topic, int partition);
 }
