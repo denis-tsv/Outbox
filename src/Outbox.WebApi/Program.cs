@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using Confluent.Kafka;
 using EFCore.MigrationExtensions.PostgreSQL;
-using Medallion.Threading;
-using Medallion.Threading.Postgres;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Outbox;
@@ -30,9 +28,6 @@ builder.Services.AddDbContextPool<AppDbContext>((serviceProvider, optionsBuilder
     
     optionsBuilder.UseSqlObjects();
 });
-builder.Services.AddSingleton<IDistributedLockProvider>(_ => 
-    new PostgresDistributedSynchronizationProvider(builder.Configuration.GetConnectionString("Outbox")!));
-
 
 builder.Services.AddKafkaClient();
 
@@ -44,10 +39,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<OutboxBackgroundSe
 builder.Services.AddSingleton<IOutboxMessagesProcessor>(sp => sp.GetRequiredService<OutboxBackgroundService>());
 
 builder.Services.AddOpenTelemetry()
-    .WithTracing(bld =>
-    {
-        //bld.AddSource(ActivitySources.OutboxSource);
-    });
+    .WithTracing();
 
 var app = builder.Build();
 

@@ -1,10 +1,10 @@
 using System.Text;
 using Confluent.Kafka;
-using Medallion.Threading;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Outbox.Configurations;
 using Outbox.Entities;
+using Outbox.Extensions;
 
 namespace Outbox.WebApi.BackgroundServices;
 
@@ -13,20 +13,17 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptions<OutboxConfiguration> _outboxOptions;
     private readonly ILogger<OutboxBackgroundService> _logger;
-    private readonly IDistributedLockProvider _distributedLockProvider;
 
     private readonly AutoResetEvent _autoResetEvent = new(false);
     
     public OutboxBackgroundService(
         IServiceProvider serviceProvider, 
         IOptions<OutboxConfiguration> outboxOptions,
-        ILogger<OutboxBackgroundService> logger,
-        IDistributedLockProvider distributedLockProvider)
+        ILogger<OutboxBackgroundService> logger)
     {
         _serviceProvider = serviceProvider;
         _outboxOptions = outboxOptions;
         _logger = logger;
-        _distributedLockProvider = distributedLockProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -52,25 +49,25 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
 
     private async Task<int> ProcessMessagesAsync(AppDbContext dbContext, CancellationToken cancellationToken)
     {
-        //pg_bouncer must be in session mode
-        await using var advisoryLock = await _distributedLockProvider.AcquireLockAsync("Outbox", cancellationToken: cancellationToken);
-        
-        var offset = await dbContext.OutboxOffsets
-            .FirstAsync(cancellationToken);
+        var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         
         var outboxMessages = await dbContext.OutboxMessages
             .AsNoTracking()
-            .Where(x => x.Id > offset.LastProcessedId)
             .OrderBy(x => x.Id)
             .Take(_outboxOptions.Value.BatchSize)
+            .ForUpdateSkipLocked()
             .ToArrayAsync(cancellationToken);
 
         if (!outboxMessages.Any()) return 0;
 
         await ProcessOutboxMessagesAsync(outboxMessages, cancellationToken);
 
-        offset.LastProcessedId = outboxMessages.Last().Id;
-        await dbContext.SaveChangesAsync(cancellationToken);
+        var messageIds = outboxMessages.Select(x => x.Id).ToArray();
+        await dbContext.OutboxMessages
+            .Where(x => messageIds.Contains(x.Id))
+            .ExecuteDeleteAsync(cancellationToken);
+        
+        await transaction.CommitAsync(cancellationToken);
         
         return outboxMessages.Length;
     }
