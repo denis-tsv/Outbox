@@ -16,5 +16,8 @@ public class OutboxMessageEntityTypeConfiguration : IEntityTypeConfiguration<Out
         builder.Property(x => x.Type).HasMaxLength(128);
         builder.Property(x => x.Topic).HasMaxLength(128);
         builder.Property(x => x.CreatedAt).HasDefaultValueSql("now()");
+        builder.Property(x => x.AvailableAfter).HasDefaultValueSql("now()");
+
+        builder.HasIndex(x => x.AvailableAfter);
     }
 }
