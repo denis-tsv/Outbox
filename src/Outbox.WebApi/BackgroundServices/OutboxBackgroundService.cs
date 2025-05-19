@@ -91,7 +91,7 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
         var outboxMessages = await dataConnection.GetTable<OutboxMessage>()
             .Where(x => x.Topic == offset.Topic && 
                         x.Partition == offset.Partition &&
-                        x.Id > offset.LastProcessedId)
+                        x.Number > offset.LastProcessedNumber)
             .OrderBy(x => x.Id)
             .Take(_outboxOptions.Value.BatchSize)
             .ToArrayAsyncLinqToDB(cancellationToken);
@@ -111,7 +111,7 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
         var lastMessage = outboxMessages.Last();
         await dataConnection.GetTable<OutboxOffset>()
             .Where(x => x.Id == offset.Id)
-            .Set(x => x.LastProcessedId, lastMessage.Id)
+            .Set(x => x.LastProcessedNumber, lastMessage.Number)
             .Set(x => x.AvailableAfter, DateTimeOffset.UtcNow)
             .UpdateAsync(cancellationToken);
         
