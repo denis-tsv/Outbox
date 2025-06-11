@@ -1,11 +1,10 @@
 using System.Text;
-using System.Threading.Channels;
 using Confluent.Kafka;
+using Medallion.Threading;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Outbox.Configurations;
 using Outbox.Entities;
-using Outbox.Extensions;
 
 namespace Outbox.WebApi.BackgroundServices;
 
@@ -14,21 +13,20 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptions<OutboxConfiguration> _outboxOptions;
     private readonly ILogger<OutboxBackgroundService> _logger;
-    
-    //channel is faster then AutoResetEvent
-    private readonly Channel<bool> _channel = Channel.CreateBounded<bool>(new BoundedChannelOptions(capacity: 1)
-    {
-        SingleReader = true, SingleWriter = false
-    });
+    private readonly IDistributedLockProvider _distributedLockProvider;
+
+    private readonly AutoResetEvent _autoResetEvent = new(false);
     
     public OutboxBackgroundService(
         IServiceProvider serviceProvider, 
         IOptions<OutboxConfiguration> outboxOptions,
-        ILogger<OutboxBackgroundService> logger)
+        ILogger<OutboxBackgroundService> logger,
+        IDistributedLockProvider distributedLockProvider)
     {
         _serviceProvider = serviceProvider;
         _outboxOptions = outboxOptions;
         _logger = logger;
+        _distributedLockProvider = distributedLockProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -37,8 +35,6 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
         {
             try
             {
-                _channel.Reader.TryRead(out _);
-                
                 using var scope = _serviceProvider.CreateScope();
                 await using var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 
@@ -56,10 +52,10 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
 
     private async Task<int> ProcessMessagesAsync(AppDbContext dbContext, CancellationToken cancellationToken)
     {
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-
+        //pg_bouncer must be in session mode
+        await using var advisoryLock = await _distributedLockProvider.AcquireLockAsync("Outbox", cancellationToken: cancellationToken);
+        
         var offset = await dbContext.OutboxOffsets
-            .ForUpdate()
             .FirstAsync(cancellationToken);
         
         var outboxMessages = await dbContext.OutboxMessages
@@ -75,8 +71,6 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
 
         offset.LastProcessedId = outboxMessages.Last().Id;
         await dbContext.SaveChangesAsync(cancellationToken);
-        
-        await transaction.CommitAsync(cancellationToken);
         
         return outboxMessages.Length;
     }
@@ -107,19 +101,10 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
     }
 
 
-    public void NewMessagesPersisted() => _channel.Writer.TryWrite(false);
+    public void NewMessagesPersisted() => _autoResetEvent.Set();
 
     private async ValueTask WaitForOutboxMessage(CancellationToken stoppingToken)
     {
-        try
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            cts.CancelAfter(_outboxOptions.Value.NoMessagesDelay);
-            await _channel.Reader.ReadAsync(cts.Token);
-        }
-        catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-        {
-            // ignored
-        }
+        _autoResetEvent.WaitOne(_outboxOptions.Value.NoMessagesDelay);
     }
 }
