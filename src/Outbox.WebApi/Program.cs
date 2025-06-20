@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using Confluent.Kafka;
 using EFCore.MigrationExtensions.PostgreSQL;
-using LinqToDB.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Outbox;
@@ -9,7 +8,6 @@ using Outbox.Configurations;
 using Outbox.Entities;
 using Outbox.WebApi.BackgroundServices;
 using Outbox.WebApi.EFCore;
-using Outbox.WebApi.Linq2db;
 using Outbox.WebApi.Telemetry;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,9 +28,6 @@ builder.Services.AddDbContextPool<AppDbContext>((serviceProvider, optionsBuilder
     
     optionsBuilder.UseSqlObjects();
 });
-
-LinqToDBForEFTools.Implementation = new OutboxLinqToDBForEFToolsImpl(builder.Configuration.GetConnectionString("Outbox")!);
-LinqToDBForEFTools.Initialize();
 
 builder.Services.AddKafkaClient();
 

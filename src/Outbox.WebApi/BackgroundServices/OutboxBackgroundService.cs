@@ -1,13 +1,9 @@
 using System.Text;
 using Confluent.Kafka;
-using LinqToDB;
-using LinqToDB.DataProvider.PostgreSQL;
-using LinqToDB.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Outbox.Configurations;
 using Outbox.Entities;
-using Outbox.WebApi.Linq2db;
 
 namespace Outbox.WebApi.BackgroundServices;
 
@@ -54,74 +50,66 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
 
     private async Task<int> ProcessMessagesAsync(AppDbContext dbContext, CancellationToken cancellationToken)
     {
-        dbContext.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTracking;
-        
-        var dataConnection = dbContext.CreateLinqToDBConnection();
-
-        IQueryable<OutboxOffset> offsetsQuery = dataConnection.GetTable<OutboxOffset>();
-        if (_offsetWithMessages != null)
-        {
-            offsetsQuery = offsetsQuery.Where(x => x.Topic == _offsetWithMessages.Value.Topic &&
-                                                   x.Partition == _offsetWithMessages.Value.Partition);
-            
-            _offsetWithMessages = null; 
-        }
-        else
-        {
-            offsetsQuery = offsetsQuery.Where(x => DateTimeOffset.UtcNow > x.AvailableAfter)
-                .OrderBy(x => x.AvailableAfter); //earliest available
-        }
-
-        var offsets = await offsetsQuery
-            .Take(1)
-            .SubQueryHint(PostgreSQLHints.ForUpdate)
-            .SubQueryHint(PostgreSQLHints.SkipLocked)
-            .AsSubQuery()
-            .UpdateWithOutput(x => x,
-                x => new OutboxOffset
-                {
-                    AvailableAfter = DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay
-                },
-                (_, _, inserted) => inserted)
-            .AsQueryable()
-            .ToArrayAsyncLinqToDB(cancellationToken);
+        //TODO Fix new messages persisted
+        var offsets = await dbContext.OutboxOffsets
+            .FromSql(
+                $"""
+                 UPDATE outbox.outbox_offsets
+                 SET available_after = {DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay}
+                 FROM (
+                     SELECT x.id as "Id"
+                     FROM outbox.outbox_offsets x
+                     WHERE {DateTimeOffset.UtcNow} > x.available_after
+                     ORDER BY x.available_after
+                     LIMIT 1
+                     FOR UPDATE SKIP LOCKED
+                 ) t1
+                 WHERE outbox.outbox_offsets.id = t1."Id"
+                 RETURNING outbox.outbox_offsets.*
+                 """)
+            .AsNoTracking()
+            .ToArrayAsync(cancellationToken);
         
         if (!offsets.Any()) return -1; //no partition
         var offset = offsets.Single();
-        
-        var outboxMessages = await dataConnection.GetTable<OutboxMessage>()
-            .Where(x => x.Topic == offset.Topic && 
-                        x.Partition == offset.Partition &&
-                        x.TransactionId >= offset.LastProcessedTransactionId &&
-                        (
-                            x.TransactionId > offset.LastProcessedTransactionId ||
-                            x.TransactionId == offset.LastProcessedTransactionId && x.Id > offset.LastProcessedId
-                        ) &&
-                        x.TransactionId < PostgreSqlExtensions.MinCurrentTransactionId
-            )
-            .OrderBy(x => x.TransactionId).ThenBy(x => x.Id)
-            .Take(_outboxOptions.Value.BatchSize)
-            .ToArrayAsyncLinqToDB(cancellationToken);
+
+        var outboxMessages = await dbContext.OutboxMessages
+            .FromSqlRaw(
+                $"""
+                SELECT *
+                FROM outbox.outbox_messages x
+                WHERE
+                    x.topic = '{offset.Topic}' AND
+                    x.partition = {offset.Partition} AND
+                    x.transaction_id >= '{offset.LastProcessedTransactionId}'::xid8 AND
+                    (x.transaction_id > '{offset.LastProcessedTransactionId}'::xid8 OR 
+                     x.transaction_id = '{offset.LastProcessedTransactionId}'::xid8 AND x.id > {offset.LastProcessedId}) AND
+                    x.transaction_id < pg_snapshot_xmin(pg_current_snapshot())
+                ORDER BY x.transaction_id, x.id
+                LIMIT {_outboxOptions.Value.BatchSize}
+                """)
+            .AsNoTracking()
+            .ToArrayAsync(cancellationToken);
 
         if (!outboxMessages.Any())
         {
-            await dataConnection.GetTable<OutboxOffset>()
+            await dbContext.OutboxOffsets
                 .Where(x => x.Id == offset.Id)
-                .Set(x => x.AvailableAfter, DateTimeOffset.UtcNow + _outboxOptions.Value.NoMessagesDelay)
-                .UpdateAsync(cancellationToken);
-            
+                .ExecuteUpdateAsync(x => x.SetProperty(p => p.AvailableAfter, DateTimeOffset.UtcNow + _outboxOptions.Value.NoMessagesDelay), cancellationToken);
+                
             return 0;
         }
 
         await ProcessOutboxMessagesAsync(outboxMessages, cancellationToken);
 
         var lastMessage = outboxMessages.Last();
-        await dataConnection.GetTable<OutboxOffset>()
+        await dbContext.OutboxOffsets
             .Where(x => x.Id == offset.Id)
-            .Set(x => x.LastProcessedId, lastMessage.Id)
-            .Set(x => x.LastProcessedTransactionId, lastMessage.TransactionId)
-            .Set(x => x.AvailableAfter, DateTimeOffset.UtcNow)
-            .UpdateAsync(cancellationToken);
+            .ExecuteUpdateAsync(x => x
+                .SetProperty(p => p.LastProcessedId, lastMessage.Id)
+                .SetProperty(p => p.LastProcessedTransactionId, lastMessage.TransactionId)
+                .SetProperty(p => p.AvailableAfter, DateTimeOffset.UtcNow),
+                cancellationToken);
         
         return outboxMessages.Length;
     }
