@@ -1,10 +1,8 @@
---SELECT pg_snapshot_xmin(pg_current_snapshot()); must return value > 1_000_000
 INSERT INTO outbox_messages
-(topic, "partition", transaction_id, "key", "type", payload, headers)
+(topic, "partition", "key", "type", payload, headers)
 SELECT
     'topic-1',
     n.v%2,
-	n.v::text::xid8,
 	n.v, 
 	'type',
 	'{"byte250":"0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"}', 
