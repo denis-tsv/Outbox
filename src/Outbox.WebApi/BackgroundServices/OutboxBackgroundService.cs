@@ -1,8 +1,5 @@
 using System.Text;
 using Confluent.Kafka;
-using LinqToDB;
-using LinqToDB.DataProvider.PostgreSQL;
-using LinqToDB.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Outbox.Configurations;
@@ -52,22 +49,22 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
     private async Task<int> ProcessMessagesAsync(AppDbContext dbContext, CancellationToken cancellationToken)
     {
         var outboxMessages = await dbContext.OutboxMessages
-            .Where(x => DateTimeOffset.UtcNow > x.AvailableAfter)
+            .FromSql($"""
+                UPDATE outbox.outbox_messages
+                SET available_after = {DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay}
+                FROM (
+                    SELECT x.id as "Id"
+                    FROM outbox.outbox_messages x
+                    WHERE {DateTimeOffset.UtcNow} > x.available_after
+                    ORDER BY x.id
+                    LIMIT {_outboxOptions.Value.BatchSize}
+                    FOR UPDATE SKIP LOCKED
+                ) t1
+                WHERE outbox.outbox_messages.id = t1."Id"
+                RETURNING outbox.outbox_messages.*
+                """)
             .AsNoTracking()
-            .ToLinqToDB()
-            .OrderBy(x => x.Id)
-            .Take(_outboxOptions.Value.BatchSize)
-            .SubQueryHint(PostgreSQLHints.ForUpdate)
-            .SubQueryHint(PostgreSQLHints.SkipLocked)
-            .AsSubQuery()
-            .UpdateWithOutput(x => x,
-                x => new OutboxMessage
-                {
-                    AvailableAfter = DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay
-                },
-                (_, _, inserted) => inserted)
-            .AsQueryable()
-            .ToArrayAsyncLinqToDB(cancellationToken);
+            .ToArrayAsync(cancellationToken);
 
         if (!outboxMessages.Any()) return 0;
 
