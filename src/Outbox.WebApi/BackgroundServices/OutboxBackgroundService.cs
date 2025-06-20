@@ -3,6 +3,7 @@ using Confluent.Kafka;
 using LinqToDB;
 using LinqToDB.DataProvider.PostgreSQL;
 using LinqToDB.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Outbox.Configurations;
 using Outbox.Entities;
@@ -53,8 +54,7 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
 
     private async Task<int> ProcessMessagesAsync(AppDbContext dbContext, CancellationToken cancellationToken)
     {
-        //change tracking can be disabled
-        //dbContext.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTracking;
+        dbContext.ChangeTracker.QueryTrackingBehavior = QueryTrackingBehavior.NoTracking;
         
         var dataConnection = dbContext.CreateLinqToDBConnection();
 
@@ -92,6 +92,7 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
         var outboxMessages = await dataConnection.GetTable<OutboxMessage>()
             .Where(x => x.Topic == offset.Topic && 
                         x.Partition == offset.Partition &&
+                        x.TransactionId >= offset.LastProcessedTransactionId &&
                         (
                             x.TransactionId > offset.LastProcessedTransactionId ||
                             x.TransactionId == offset.LastProcessedTransactionId && x.Id > offset.LastProcessedId
