@@ -52,31 +52,22 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
     {
         //TODO Fix new messages persisted
         var offsets = await dbContext.OutboxOffsets
-            .FromSql(
-                $"""
-UPDATE
-        outbox.outbox_offsets
-SET
-        available_after = {DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay}
-FROM
-        (
-                SELECT
-                        x.id as "Id"
-                FROM
-                        outbox.outbox_offsets x
-                WHERE
-                        {DateTimeOffset.UtcNow} > x.available_after
-                ORDER BY
-                        x.available_after
-                LIMIT 1
-                FOR UPDATE
-                SKIP LOCKED
-        ) t1
-WHERE
-        outbox.outbox_offsets.id = t1."Id"
-RETURNING
-        outbox.outbox_offsets.*
-""")
+            .FromSql($"""
+                      UPDATE outbox.outbox_offsets
+                      SET available_after = {DateTimeOffset.UtcNow + _outboxOptions.Value.LockedDelay}
+                      FROM (
+                          SELECT x.id as "Id"
+                          FROM outbox.outbox_offsets x
+                          WHERE {DateTimeOffset.UtcNow} > x.available_after
+                          ORDER BY x.available_after
+                          LIMIT 1
+                          FOR UPDATE
+                          SKIP LOCKED
+                      ) t1
+                      WHERE outbox.outbox_offsets.id = t1."Id"
+                      RETURNING outbox.outbox_offsets.*
+                      """)
+            .AsNoTracking()
             .ToArrayAsync(cancellationToken);
         
         if (!offsets.Any()) return -1; //no partition
