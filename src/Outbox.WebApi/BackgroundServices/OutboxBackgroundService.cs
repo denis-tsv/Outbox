@@ -117,7 +117,6 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
     private async Task ProcessOutboxMessagesAsync(OutboxMessage[] messages, CancellationToken cancellationToken)
     {
         var producer = _serviceProvider.GetRequiredService<IProducer<Null, string>>();
-        producer.InitTransactions(TimeSpan.FromSeconds(10));
         producer.BeginTransaction();
         var tasks = messages.Select(x => ProcessMessageAsync(producer, x, cancellationToken)).ToList();
         await Task.WhenAll(tasks);

@@ -71,6 +71,9 @@ app.MapPost("/messages", async (CreateMessageDto dto, AppDbContext dbContext, Ca
     })
     .WithName("CreateMessage");
 
+var producer = app.Services.GetRequiredService<IProducer<Null, string>>();
+producer.InitTransactions(TimeSpan.FromSeconds(10));
+
 app.Run();
 
 public record CreateMessageDto(
