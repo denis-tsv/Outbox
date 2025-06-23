@@ -116,26 +116,24 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
     
     private async Task ProcessOutboxMessagesAsync(OutboxMessage[] messages, CancellationToken cancellationToken)
     {
-        var tasks = messages.Select(x =>
-        {
-            if (x.Key == null) return ProcessMessageAsync<Null>(null!, x, cancellationToken);
-            return ProcessMessageAsync(x.Key!, x, cancellationToken);
-        }).ToList();
-
+        var producer = _serviceProvider.GetRequiredService<IProducer<Null, string>>();
+        producer.InitTransactions(TimeSpan.FromSeconds(10));
+        producer.BeginTransaction();
+        var tasks = messages.Select(x => ProcessMessageAsync(producer, x, cancellationToken)).ToList();
         await Task.WhenAll(tasks);
+        producer.CommitTransaction();
     }
     
-    private Task ProcessMessageAsync<TKey>(TKey key, OutboxMessage message, CancellationToken cancellationToken)
+    private Task<DeliveryResult<Null, string>> ProcessMessageAsync(IProducer<Null, string> producer, OutboxMessage message, CancellationToken cancellationToken)
     {
-        var kafkaMessage = new Message<TKey, string>
+        var kafkaMessage = new Message<Null, string>
         {
-            Key = key, 
             Value = message.Payload,
             Headers = new()
         };
         foreach (var header in message.Headers)
             kafkaMessage.Headers.Add(new Header(header.Key, Encoding.UTF8.GetBytes(header.Value)));    
-        var producer = _serviceProvider.GetRequiredService<IProducer<TKey, string>>();
+        
         return producer.ProduceAsync(message.Topic, kafkaMessage, cancellationToken);
     }
 
