@@ -39,9 +39,9 @@ public class OutboxMessageContext : IOutboxMessageContext
         foreach (var message in _messages)
         {
             var command = batch.CreateBatchCommand();
-            command.CommandText = "insert into outbox.outbox_messages(topic, partition, type, key, payload, headers) values (@topic, @partition, @type, @key, @payload, @headers)";
-            command.Parameters.AddWithValue("@topic", message.Topic);
-            command.Parameters.AddWithValue("@partition", message.Partition);
+            command.CommandText = "call outbox.insert_outbox_message(@ptopic, @ppartition, @type, @key, @payload, @headers)";
+            command.Parameters.AddWithValue("@ptopic", message.Topic);
+            command.Parameters.AddWithValue("@ppartition", message.Partition);
             command.Parameters.AddWithValue("@type", message.Type);
             command.Parameters.AddWithValue("@key", message.Key);
             command.Parameters.AddWithValue("@payload", NpgsqlDbType.Jsonb, message.Payload);

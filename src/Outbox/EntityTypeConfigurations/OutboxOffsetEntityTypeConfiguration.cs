@@ -18,14 +18,14 @@ public class OutboxOffsetEntityTypeConfiguration : IEntityTypeConfiguration<Outb
             Id = 2,
             Topic = "topic-1", 
             Partition = 0,
-            LastProcessedId = 0,
+            LastProcessedNumber = 0,
             AvailableAfter = DateTimeOffset.Parse("2025-05-18T12:00")
         }, new OutboxOffset
         {
             Id = 3,
             Topic = "topic-1", 
             Partition = 1,
-            LastProcessedId = 0,
+            LastProcessedNumber = 0,
             AvailableAfter = DateTimeOffset.Parse("2025-05-18T12:00")
         });
     }

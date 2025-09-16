@@ -5,6 +5,7 @@ public class OutboxMessage
     public int Id { get; set; }
     public string Topic { get; set; } = null!;
     public int Partition { get; set; }
+    public int Number { get; set; }
     public string? Key { get; set; }
     public string Type { get; set; } = null!; //metadata
     public string Payload { get; set; } = null!;
