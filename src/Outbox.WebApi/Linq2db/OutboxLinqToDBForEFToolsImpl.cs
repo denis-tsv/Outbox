@@ -28,7 +28,8 @@ public class OutboxLinqToDBForEFToolsImpl : LinqToDBForEFToolsImplDefault
 
         //default parameter type for ulong is decimal, it produces an error on mapping to xid8
         result.SetConvertExpression<ulong, DataParameter>(value => new DataParameter(null, value, DataType.UInt64));
-
+        result.SetConverter<ulong, DataParameter>(value => new DataParameter { Value = (decimal)value, DataType = DataType.Decimal });
+        
         result.SetConverter<string, Dictionary<string, string>>(str => JsonSerializer.Deserialize<Dictionary<string, string>>(str) ?? new Dictionary<string, string>());
         result.SetConverter<Dictionary<string, string>, string>(dict => JsonSerializer.Serialize(dict));
         

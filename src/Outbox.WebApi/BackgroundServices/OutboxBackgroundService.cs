@@ -89,14 +89,12 @@ public class OutboxBackgroundService : BackgroundService, IOutboxMessagesProcess
         if (!offsets.Any()) return -1; //no partition
         var offset = offsets.Single();
         
-        var outboxMessages = await dataConnection.GetTable<OutboxMessage>()
+        var outboxMessages = await dbContext.OutboxMessages
             .Where(x => x.Topic == offset.Topic && 
                         x.Partition == offset.Partition &&
-                        x.TransactionId >= offset.LastProcessedTransactionId &&
-                        (
-                            x.TransactionId > offset.LastProcessedTransactionId ||
-                            x.TransactionId == offset.LastProcessedTransactionId && x.Id > offset.LastProcessedId
-                        ) &&
+                        PostgreSqlExtensions.GreaterThan(
+                            x.TransactionId, x.Id,
+                            offset.LastProcessedTransactionId, offset.LastProcessedId) &&
                         x.TransactionId < PostgreSqlExtensions.MinCurrentTransactionId
             )
             .OrderBy(x => x.TransactionId).ThenBy(x => x.Id)
